@@ -37,17 +37,22 @@
 
     async function loadSettingsFromSupabase() {
       try {
-        // Load global settings (rotate enabled/disabled)
+        // Load global settings (rotate enabled/disabled and current index)
         const { data: settingsData, error: settingsError } = await supabaseClient
           .from('global_settings')
-          .select('value')
-          .eq('key', 'rotate_enabled')
-          .single();
+          .select('key, value')
+          .in('key', ['rotate_enabled', 'current_rotation_index']);
 
-        if (settingsError && settingsError.code !== 'PGRST116') {
+        if (settingsError) {
           console.warn('Error loading global settings:', settingsError);
         } else if (settingsData) {
-          rotateEnabled = settingsData.value;
+          settingsData.forEach(setting => {
+            if (setting.key === 'rotate_enabled') {
+              rotateEnabled = setting.value;
+            } else if (setting.key === 'current_rotation_index') {
+              currentIndex = setting.value || 0;
+            }
+          });
         }
 
         // Load rotation admins
@@ -63,11 +68,22 @@
 
         return {
           rotationAdmins: adminsData || [],
-          rotateEnabled: rotateEnabled
+          rotateEnabled: rotateEnabled,
+          currentIndex: currentIndex
         };
       } catch (error) {
         console.error('Failed to load settings from Supabase:', error);
         throw error;
+      }
+    }
+
+    async function saveCurrentRotationIndex(index) {
+      try {
+        await supabaseClient
+          .from('global_settings')
+          .upsert({ key: 'current_rotation_index', value: index });
+      } catch (error) {
+        console.error('Error saving rotation index:', error);
       }
     }
 
@@ -89,7 +105,7 @@
       countdownInterval = setInterval(updateTimer, 1000);
     }
 
-    function autoRedirectToNext() {
+    async function autoRedirectToNext() {
       // Filter only enabled admins
       const active = rotationAdmins.filter(a => a && a.enabled && a.link);
       
@@ -103,8 +119,14 @@
       currentIndex = (currentIndex + 1) % active.length;
       const admin = active[currentIndex];
       
+      // Save the new rotation index to database
+      await saveCurrentRotationIndex(currentIndex);
+      
       statusEl.classList.remove("error");
       statusEl.textContent = `🔁 Redirect ke: ${admin.name || 'admin'} (${currentIndex + 1}/${active.length})`;
+      
+      // Debug info
+      console.log(`Rotation: Index ${currentIndex}, Admin: ${admin.name}, Total active: ${active.length}`);
       
       // Start countdown and redirect
       startCountdown(admin, active.length);
@@ -124,6 +146,7 @@
 
         rotationAdmins = settings.rotationAdmins;
         rotateEnabled = settings.rotateEnabled;
+        currentIndex = settings.currentIndex || 0;
 
         // Global OFF?
         if (!rotateEnabled) {

@@ -23,7 +23,9 @@ CREATE TABLE IF NOT EXISTS global_settings (
 
 -- Insert default global settings
 INSERT INTO global_settings (key, value) 
-VALUES ('rotate_enabled', 'true')
+VALUES 
+  ('rotate_enabled', 'true'),
+  ('current_rotation_index', '0')
 ON CONFLICT (key) DO NOTHING;
 
 -- Create function to update updated_at timestamp

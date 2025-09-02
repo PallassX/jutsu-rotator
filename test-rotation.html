@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="ms">
+<head>
+  <meta charset="UTF-8" />
+  <title>Test Rotation Logic</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+  <script src="supabase-config.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; max-width: 800px; margin: auto; }
+    .test-result { margin: 10px 0; padding: 10px; border-radius: 5px; }
+    .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+    .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+    .info { background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
+    button { padding: 10px 20px; margin: 5px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; }
+    button:hover { background: #0056b3; }
+  </style>
+</head>
+<body>
+  <h2>🧪 Test Rotation Logic</h2>
+  <div id="results"></div>
+  <button onclick="testRotation()">Test Rotation</button>
+  <button onclick="resetRotationIndex()">Reset Rotation Index</button>
+  <button onclick="checkDatabase()">Check Database</button>
+
+  <script>
+    function addResult(message, type = 'info') {
+      const results = document.getElementById('results');
+      const div = document.createElement('div');
+      div.className = `test-result ${type}`;
+      div.textContent = message;
+      results.appendChild(div);
+    }
+
+    async function checkDatabase() {
+      try {
+        addResult('Checking database...', 'info');
+        
+        // Check rotation admins
+        const { data: admins, error: adminsError } = await supabaseClient
+          .from('rotation_admins')
+          .select('*')
+          .order('sort_order', { ascending: true });
+
+        if (adminsError) throw adminsError;
+
+        const active = admins.filter(a => a && a.enabled && a.link);
+        addResult(`Found ${admins.length} total admins, ${active.length} active`, 'info');
+        
+        active.forEach((admin, index) => {
+          addResult(`${index + 1}. ${admin.name} - ${admin.link}`, 'info');
+        });
+
+        // Check current rotation index
+        const { data: indexData, error: indexError } = await supabaseClient
+          .from('global_settings')
+          .select('value')
+          .eq('key', 'current_rotation_index')
+          .single();
+
+        if (indexError && indexError.code !== 'PGRST116') throw indexError;
+        
+        const currentIndex = indexData ? indexData.value : 0;
+        addResult(`Current rotation index: ${currentIndex}`, 'info');
+
+      } catch (error) {
+        addResult(`Error: ${error.message}`, 'error');
+      }
+    }
+
+    async function testRotation() {
+      try {
+        addResult('Testing rotation logic...', 'info');
+        
+        // Load current settings
+        const { data: settingsData, error: settingsError } = await supabaseClient
+          .from('global_settings')
+          .select('key, value')
+          .in('key', ['rotate_enabled', 'current_rotation_index']);
+
+        if (settingsError) throw settingsError;
+
+        let currentIndex = 0;
+        settingsData.forEach(setting => {
+          if (setting.key === 'current_rotation_index') {
+            currentIndex = setting.value || 0;
+          }
+        });
+
+        // Load admins
+        const { data: admins, error: adminsError } = await supabaseClient
+          .from('rotation_admins')
+          .select('*')
+          .order('sort_order', { ascending: true });
+
+        if (adminsError) throw adminsError;
+
+        const active = admins.filter(a => a && a.enabled && a.link);
+        
+        if (active.length === 0) {
+          addResult('No active admins found!', 'error');
+          return;
+        }
+
+        // Test rotation logic
+        const oldIndex = currentIndex;
+        const newIndex = (currentIndex + 1) % active.length;
+        const selectedAdmin = active[newIndex];
+
+        addResult(`Old index: ${oldIndex}`, 'info');
+        addResult(`New index: ${newIndex}`, 'info');
+        addResult(`Selected admin: ${selectedAdmin.name}`, 'success');
+        addResult(`Total active admins: ${active.length}`, 'info');
+
+        // Save new index
+        await supabaseClient
+          .from('global_settings')
+          .upsert({ key: 'current_rotation_index', value: newIndex });
+
+        addResult('Rotation index updated in database!', 'success');
+
+      } catch (error) {
+        addResult(`Error: ${error.message}`, 'error');
+      }
+    }
+
+    async function resetRotationIndex() {
+      try {
+        await supabaseClient
+          .from('global_settings')
+          .upsert({ key: 'current_rotation_index', value: 0 });
+        
+        addResult('Rotation index reset to 0', 'success');
+      } catch (error) {
+        addResult(`Error: ${error.message}`, 'error');
+      }
+    }
+
+    // Auto-check database on load
+    window.onload = checkDatabase;
+  </script>
+</body>
+</html>

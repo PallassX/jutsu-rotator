@@ -55,6 +55,31 @@
     <div class="muted">Matikan untuk hentikan semua redirect walaupun ada admin aktif.</div>
   </div>
 
+  <!-- Rotation Index Management -->
+  <div class="wrap">
+    <h3>🔄 Rotation Index Management</h3>
+    <div class="row-3">
+      <div>
+        <label>Current Rotation Index:</label>
+        <div class="badge" id="currentIndexDisplay">Loading...</div>
+      </div>
+      <div>
+        <label>Next Admin:</label>
+        <div class="badge" id="nextAdminDisplay">Loading...</div>
+      </div>
+      <div>
+        <label>Set Index:</label>
+        <input type="number" id="setIndexInput" placeholder="0" min="0" style="width:80px; display:inline-block; margin-right:8px;">
+        <button onclick="setRotationIndex()" class="btn-ghost btn-inline">Set</button>
+      </div>
+    </div>
+    <div style="display:flex; gap:8px; margin-top:10px;">
+      <button onclick="resetRotationIndex()" class="btn-ghost">🔄 Reset to 0</button>
+      <button onclick="refreshRotationInfo()" class="btn-ghost">🔄 Refresh</button>
+    </div>
+    <p class="muted">Rotation index determines which admin will be selected next. Reset to 0 to start from the first admin.</p>
+  </div>
+
   <!-- … bahagian atas fail kekal sama … -->
 
 <div class="wrap">
@@ -85,6 +110,7 @@
   // ====== STATE ======
   let rotationAdmins = [];
   let rotateEnabled = true;
+  let currentRotationIndex = 0;
 
   // ====== SUPABASE FUNCTIONS ======
   async function loadRotationAdmins() {
@@ -106,15 +132,24 @@
     try {
       const { data, error } = await supabaseClient
         .from('global_settings')
-        .select('value')
-        .eq('key', 'rotate_enabled')
-        .single();
+        .select('key, value')
+        .in('key', ['rotate_enabled', 'current_rotation_index']);
 
-      if (error && error.code !== 'PGRST116') throw error;
-      return data ? data.value : true;
+      if (error) throw error;
+      
+      let settings = { rotateEnabled: true, currentRotationIndex: 0 };
+      data.forEach(setting => {
+        if (setting.key === 'rotate_enabled') {
+          settings.rotateEnabled = setting.value;
+        } else if (setting.key === 'current_rotation_index') {
+          settings.currentRotationIndex = setting.value || 0;
+        }
+      });
+      
+      return settings;
     } catch (error) {
       console.error('Error loading global settings:', error);
-      return true; // default to enabled
+      return { rotateEnabled: true, currentRotationIndex: 0 }; // default values
     }
   }
 
@@ -127,6 +162,20 @@
       if (error) throw error;
     } catch (error) {
       console.error('Error saving global settings:', error);
+      throw error;
+    }
+  }
+
+  async function saveRotationIndex(index) {
+    try {
+      const { error } = await supabaseClient
+        .from('global_settings')
+        .upsert({ key: 'current_rotation_index', value: index });
+
+      if (error) throw error;
+      currentRotationIndex = index;
+    } catch (error) {
+      console.error('Error saving rotation index:', error);
       throw error;
     }
   }
@@ -279,6 +328,80 @@
     }, 3000);
   }
 
+  async function resetRotationIndex() {
+    try {
+      updateStatus("⏳ Resetting rotation index...");
+      await saveRotationIndex(0);
+      await refreshRotationInfo();
+      updateStatus("✅ Rotation index reset to 0.");
+    } catch (error) {
+      updateStatus("❌ Error resetting rotation index.");
+    }
+  }
+
+  async function setRotationIndex() {
+    try {
+      const input = document.getElementById("setIndexInput");
+      const newIndex = parseInt(input.value);
+      
+      if (isNaN(newIndex) || newIndex < 0) {
+        updateStatus("❌ Please enter a valid index (0 or higher).");
+        return;
+      }
+
+      const active = rotationAdmins.filter(a => a && a.enabled && a.link);
+      if (active.length === 0) {
+        updateStatus("❌ No active admins found.");
+        return;
+      }
+
+      // Validate index is within range
+      if (newIndex >= active.length) {
+        updateStatus(`❌ Index must be between 0 and ${active.length - 1}.`);
+        return;
+      }
+
+      updateStatus("⏳ Setting rotation index...");
+      await saveRotationIndex(newIndex);
+      await refreshRotationInfo();
+      input.value = ""; // Clear input
+      updateStatus(`✅ Rotation index set to ${newIndex}.`);
+    } catch (error) {
+      updateStatus("❌ Error setting rotation index.");
+    }
+  }
+
+  async function refreshRotationInfo() {
+    try {
+      // Load current settings
+      const settings = await loadGlobalSettings();
+      currentRotationIndex = settings.currentRotationIndex;
+      
+      // Update display
+      document.getElementById("currentIndexDisplay").textContent = currentRotationIndex;
+      
+      // Update input field placeholder
+      const input = document.getElementById("setIndexInput");
+      if (input && !input.value) { // Only update placeholder if input is empty
+        input.placeholder = currentRotationIndex;
+      }
+      
+      // Calculate next admin
+      const active = rotationAdmins.filter(a => a && a.enabled && a.link);
+      if (active.length > 0) {
+        const nextIndex = (currentRotationIndex + 1) % active.length;
+        const nextAdmin = active[nextIndex];
+        document.getElementById("nextAdminDisplay").textContent = `${nextAdmin.name} (${nextIndex + 1}/${active.length})`;
+      } else {
+        document.getElementById("nextAdminDisplay").textContent = "No active admins";
+      }
+    } catch (error) {
+      console.error('Error refreshing rotation info:', error);
+      document.getElementById("currentIndexDisplay").textContent = "Error";
+      document.getElementById("nextAdminDisplay").textContent = "Error";
+    }
+  }
+
   // ====== HELPERS ======
   function escapeHtml(str) {
     return String(str).replace(/[&<>"']/g, s => (
@@ -296,7 +419,9 @@
       
       // Load data
       rotationAdmins = await loadRotationAdmins();
-      rotateEnabled = await loadGlobalSettings();
+      const settings = await loadGlobalSettings();
+      rotateEnabled = settings.rotateEnabled;
+      currentRotationIndex = settings.currentRotationIndex;
       
       // Setup UI
       document.getElementById("masterToggle").checked = !!rotateEnabled;
@@ -312,6 +437,7 @@
       });
       
       renderRotationTable();
+      await refreshRotationInfo();
       updateStatus("✅ Data berjaya dimuatkan dari Supabase.");
       
     } catch (error) {
