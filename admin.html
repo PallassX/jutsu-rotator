@@ -52,7 +52,7 @@
         <span class="slider"></span>
       </label>
     </div>
-    <div class="muted">Matikan untuk hentikan semua redirect walaupun ada admin aktif.</div>
+    <div class="muted">Matikan untuk hentikan semua redirect dan matikan semua admin. Hidupkan untuk aktifkan semua admin.</div>
   </div>
 
   <!-- Rotation Index Management -->
@@ -166,6 +166,25 @@
     }
   }
 
+  async function toggleAllAdmins(enabled) {
+    try {
+      if (rotationAdmins.length === 0) return;
+      
+      // Update all admins in batch - get all IDs first
+      const adminIds = rotationAdmins.map(admin => admin.id);
+      
+      const { error } = await supabaseClient
+        .from('rotation_admins')
+        .update({ enabled: enabled })
+        .in('id', adminIds);
+
+      if (error) throw error;
+    } catch (error) {
+      console.error('Error toggling all admins:', error);
+      throw error;
+    }
+  }
+
   async function saveRotationIndex(index) {
     try {
       const { error } = await supabaseClient
@@ -234,13 +253,15 @@
     tbody.innerHTML = "";
     rotationAdmins.forEach((adm, idx) => {
       const tr = document.createElement("tr");
+      const isGlobalControlled = !rotateEnabled; // Show visual cue when global is off
       tr.innerHTML = `
         <td>${idx+1}</td>
         <td>
-          <label class="switch">
-            <input type="checkbox" ${adm.enabled ? "checked":""} onchange="toggleAdminEnabled(${adm.id}, this.checked)">
+          <label class="switch" ${isGlobalControlled ? 'style="opacity: 0.6;"' : ''}>
+            <input type="checkbox" ${adm.enabled ? "checked":""} onchange="toggleAdminEnabled(${adm.id}, this.checked)" ${isGlobalControlled ? 'disabled' : ''}>
             <span class="slider"></span>
           </label>
+          ${isGlobalControlled ? '<small style="color:#666; font-size:11px; display:block; margin-top:2px;">Global OFF</small>' : ''}
         </td>
         <td>${escapeHtml(adm.name || "")}</td>
         <td><a href="${escapeUrl(adm.link)}" target="_blank" rel="noopener">${escapeHtml(adm.link || "")}</a></td>
@@ -428,8 +449,18 @@
       document.getElementById("masterToggle").addEventListener("change", async (e)=> {
         try {
           rotateEnabled = !!e.target.checked;
-          await saveGlobalSettings(rotateEnabled);
-          updateStatus(rotateEnabled ? "✅ Rotate Mode diaktifkan." : "⛔ Rotate Mode dimatikan.");
+          updateStatus("⏳ Mengemas kini tetapan global...");
+          
+          // Save global setting and toggle all admins
+          await Promise.all([
+            saveGlobalSettings(rotateEnabled),
+            toggleAllAdmins(rotateEnabled)
+          ]);
+          
+          // Refresh data to show updated admin states
+          await refreshData();
+          
+          updateStatus(rotateEnabled ? "✅ Rotate Mode diaktifkan - Semua admin diaktifkan." : "⛔ Rotate Mode dimatikan - Semua admin dimatikan.");
         } catch (error) {
           updateStatus("❌ Ralat mengemas kini tetapan global.");
           e.target.checked = !rotateEnabled; // revert checkbox
