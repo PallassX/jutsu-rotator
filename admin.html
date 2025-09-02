@@ -42,6 +42,24 @@
 <body>
   <h2>🔄 Rotation Admins — Supabase Database</h2>
   <p id="status" class="status">Click to Rotate Mode aktif. Data disimpan dalam Supabase database.</p>
+  
+  <!-- Debug Panel -->
+  <div class="wrap" style="background: #f8f9fa; border: 1px solid #dee2e6;">
+    <h3>🔧 Debug Information</h3>
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 12px;">
+      <div>
+        <strong>Connection Status:</strong> <span id="debugConnection">Testing...</span><br>
+        <strong>Rotation Admins:</strong> <span id="debugAdmins">Loading...</span><br>
+        <strong>Global Settings:</strong> <span id="debugSettings">Loading...</span>
+      </div>
+      <div>
+        <strong>Current Index:</strong> <span id="debugIndex">Loading...</span><br>
+        <strong>Rotate Enabled:</strong> <span id="debugEnabled">Loading...</span><br>
+        <strong>Last Error:</strong> <span id="debugError">None</span>
+      </div>
+    </div>
+    <button onclick="runDebugTests()" class="btn-ghost" style="margin-top: 10px;">🔍 Run Debug Tests</button>
+  </div>
 
   <!-- Master ON/OFF -->
   <div class="wrap flex" style="justify-content:space-between">
@@ -140,9 +158,13 @@
       let settings = { rotateEnabled: true, currentRotationIndex: 0 };
       data.forEach(setting => {
         if (setting.key === 'rotate_enabled') {
-          settings.rotateEnabled = setting.value;
+          // Handle both boolean and string values
+          settings.rotateEnabled = typeof setting.value === 'boolean' 
+            ? setting.value 
+            : (setting.value === 'true' || setting.value === true);
         } else if (setting.key === 'current_rotation_index') {
-          settings.currentRotationIndex = setting.value || 0;
+          // Handle both number and string values
+          settings.currentRotationIndex = parseInt(setting.value) || 0;
         }
       });
       
@@ -157,7 +179,7 @@
     try {
       const { error } = await supabaseClient
         .from('global_settings')
-        .upsert({ key: 'rotate_enabled', value: enabled });
+        .upsert({ key: 'rotate_enabled', value: enabled }, { onConflict: 'key' });
 
       if (error) throw error;
     } catch (error) {
@@ -189,7 +211,7 @@
     try {
       const { error } = await supabaseClient
         .from('global_settings')
-        .upsert({ key: 'current_rotation_index', value: index });
+        .upsert({ key: 'current_rotation_index', value: index }, { onConflict: 'key' });
 
       if (error) throw error;
       currentRotationIndex = index;
@@ -336,8 +358,10 @@
     try {
       rotationAdmins = await loadRotationAdmins();
       renderRotationTable();
+      updateDebugInfo();
     } catch (error) {
       updateStatus("❌ Ralat memuatkan data.");
+      document.getElementById("debugError").textContent = error.message;
     }
   }
 
@@ -394,12 +418,18 @@
 
   async function refreshRotationInfo() {
     try {
+      console.log('Refreshing rotation info...');
+      
       // Load current settings
       const settings = await loadGlobalSettings();
       currentRotationIndex = settings.currentRotationIndex;
+      console.log('Current rotation index:', currentRotationIndex);
       
       // Update display
-      document.getElementById("currentIndexDisplay").textContent = currentRotationIndex;
+      const currentIndexDisplay = document.getElementById("currentIndexDisplay");
+      if (currentIndexDisplay) {
+        currentIndexDisplay.textContent = currentRotationIndex;
+      }
       
       // Update input field placeholder
       const input = document.getElementById("setIndexInput");
@@ -409,17 +439,78 @@
       
       // Calculate next admin
       const active = rotationAdmins.filter(a => a && a.enabled && a.link);
-      if (active.length > 0) {
-        const nextIndex = (currentRotationIndex + 1) % active.length;
-        const nextAdmin = active[nextIndex];
-        document.getElementById("nextAdminDisplay").textContent = `${nextAdmin.name} (${nextIndex + 1}/${active.length})`;
-      } else {
-        document.getElementById("nextAdminDisplay").textContent = "No active admins";
+      console.log('Active admins:', active);
+      
+      const nextAdminDisplay = document.getElementById("nextAdminDisplay");
+      if (nextAdminDisplay) {
+        if (active.length > 0) {
+          const nextIndex = (currentRotationIndex + 1) % active.length;
+          const nextAdmin = active[nextIndex];
+          nextAdminDisplay.textContent = `${nextAdmin.name} (${nextIndex + 1}/${active.length})`;
+        } else {
+          nextAdminDisplay.textContent = "No active admins";
+        }
       }
+      
+      updateDebugInfo();
     } catch (error) {
       console.error('Error refreshing rotation info:', error);
-      document.getElementById("currentIndexDisplay").textContent = "Error";
-      document.getElementById("nextAdminDisplay").textContent = "Error";
+      const currentIndexDisplay = document.getElementById("currentIndexDisplay");
+      const nextAdminDisplay = document.getElementById("nextAdminDisplay");
+      if (currentIndexDisplay) currentIndexDisplay.textContent = "Error";
+      if (nextAdminDisplay) nextAdminDisplay.textContent = "Error";
+      document.getElementById("debugError").textContent = error.message;
+    }
+  }
+
+  // ====== DEBUG FUNCTIONS ======
+  function updateDebugInfo() {
+    try {
+      document.getElementById("debugConnection").textContent = "Connected";
+      document.getElementById("debugAdmins").textContent = `${rotationAdmins.length} admins`;
+      document.getElementById("debugIndex").textContent = currentRotationIndex;
+      document.getElementById("debugEnabled").textContent = rotateEnabled ? "Yes" : "No";
+      
+      const activeAdmins = rotationAdmins.filter(a => a && a.enabled && a.link);
+      document.getElementById("debugSettings").textContent = `${activeAdmins.length} active`;
+    } catch (error) {
+      document.getElementById("debugError").textContent = error.message;
+    }
+  }
+
+  async function runDebugTests() {
+    const debugError = document.getElementById("debugError");
+    debugError.textContent = "Running tests...";
+    
+    try {
+      // Test 1: Connection
+      const { data, error } = await supabaseClient
+        .from('global_settings')
+        .select('count')
+        .limit(1);
+      
+      if (error) throw error;
+      document.getElementById("debugConnection").textContent = "✅ Connected";
+      
+      // Test 2: Load admins
+      const admins = await loadRotationAdmins();
+      document.getElementById("debugAdmins").textContent = `✅ ${admins.length} admins`;
+      
+      // Test 3: Load settings
+      const settings = await loadGlobalSettings();
+      document.getElementById("debugSettings").textContent = `✅ Settings loaded`;
+      
+      // Test 4: Test toggle
+      const testToggle = !rotateEnabled;
+      await saveGlobalSettings(testToggle);
+      await saveGlobalSettings(rotateEnabled); // Restore
+      document.getElementById("debugEnabled").textContent = `✅ Toggle works`;
+      
+      debugError.textContent = "All tests passed!";
+      
+    } catch (error) {
+      console.error('Debug test error:', error);
+      debugError.textContent = `❌ ${error.message}`;
     }
   }
 
@@ -437,43 +528,61 @@
   async function boot(){
     try {
       updateStatus("⏳ Memuatkan data dari Supabase...");
+      console.log('Starting boot process...');
       
-      // Load data
+      // Load data with better error handling
+      console.log('Loading rotation admins...');
       rotationAdmins = await loadRotationAdmins();
+      console.log('Loaded rotation admins:', rotationAdmins);
+      
+      console.log('Loading global settings...');
       const settings = await loadGlobalSettings();
+      console.log('Loaded global settings:', settings);
+      
       rotateEnabled = settings.rotateEnabled;
       currentRotationIndex = settings.currentRotationIndex;
       
       // Setup UI
-      document.getElementById("masterToggle").checked = !!rotateEnabled;
-      document.getElementById("masterToggle").addEventListener("change", async (e)=> {
-        try {
-          rotateEnabled = !!e.target.checked;
-          updateStatus("⏳ Mengemas kini tetapan global...");
-          
-          // Save global setting and toggle all admins
-          await Promise.all([
-            saveGlobalSettings(rotateEnabled),
-            toggleAllAdmins(rotateEnabled)
-          ]);
-          
-          // Refresh data to show updated admin states
-          await refreshData();
-          
-          updateStatus(rotateEnabled ? "✅ Rotate Mode diaktifkan - Semua admin diaktifkan." : "⛔ Rotate Mode dimatikan - Semua admin dimatikan.");
-        } catch (error) {
-          updateStatus("❌ Ralat mengemas kini tetapan global.");
-          e.target.checked = !rotateEnabled; // revert checkbox
-        }
-      });
+      const masterToggle = document.getElementById("masterToggle");
+      if (masterToggle) {
+        masterToggle.checked = !!rotateEnabled;
+        console.log('Set master toggle to:', rotateEnabled);
+        
+        masterToggle.addEventListener("change", async (e)=> {
+          try {
+            console.log('Master toggle changed to:', e.target.checked);
+            rotateEnabled = !!e.target.checked;
+            updateStatus("⏳ Mengemas kini tetapan global...");
+            
+            // Save global setting and toggle all admins
+            await Promise.all([
+              saveGlobalSettings(rotateEnabled),
+              toggleAllAdmins(rotateEnabled)
+            ]);
+            
+            // Refresh data to show updated admin states
+            await refreshData();
+            
+            updateStatus(rotateEnabled ? "✅ Rotate Mode diaktifkan - Semua admin diaktifkan." : "⛔ Rotate Mode dimatikan - Semua admin dimatikan.");
+          } catch (error) {
+            console.error('Error in master toggle:', error);
+            updateStatus("❌ Ralat mengemas kini tetapan global.");
+            e.target.checked = !rotateEnabled; // revert checkbox
+          }
+        });
+      } else {
+        console.error('Master toggle element not found!');
+      }
       
       renderRotationTable();
       await refreshRotationInfo();
+      updateDebugInfo();
       updateStatus("✅ Data berjaya dimuatkan dari Supabase.");
       
     } catch (error) {
-      updateStatus("❌ Ralat memuatkan data dari Supabase.");
       console.error('Boot error:', error);
+      updateStatus("❌ Ralat memuatkan data dari Supabase: " + error.message);
+      document.getElementById("debugError").textContent = error.message;
     }
   }
   
