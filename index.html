@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="ms">
+<head>
+  <meta charset="UTF-8" />
+  <title>Redirect Telegram | Click to Rotate</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+  <script src="supabase-config.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; background:#f4f4f4; padding:24px; max-width:720px; margin:auto; text-align:center; }
+    h2 { margin-top:56px; }
+    .status { font-size:18px; margin-top:18px; color:#0a7c2f; }
+    .error { color:#b00020; }
+    .muted { color:#666; font-size:14px; margin-top:6px; }
+    .badge { display:inline-block; margin-top:10px; padding:6px 10px; border-radius:999px; background:#fff; border:1px solid #ddd; }
+    a.btn { display:inline-block; padding:8px 12px; border-radius:10px; border:1px solid #ddd; margin-top:10px; text-decoration:none; }
+  </style>
+</head>
+<body>
+  <h2>🔁 Click to Rotate Links</h2>
+  <div class="badge"><strong>Mode:</strong> Click to Rotate</div>
+  <p class="status" id="status">⏳ Memeriksa tetapan...</p>
+  <p class="muted">Klik butang di bawah untuk rotate ke admin seterusnya.</p>
+  <button id="rotateBtn" onclick="rotateToNext()" style="display:none; margin-top:20px; padding:12px 24px; background:#0a7c2f; color:white; border:none; border-radius:8px; font-size:16px; cursor:pointer;">🔄 Rotate ke Admin Seterusnya</button>
+
+  <script>
+    const statusEl = document.getElementById("status");
+    const rotateBtn = document.getElementById("rotateBtn");
+    
+    let rotationAdmins = [];
+    let currentIndex = 0;
+    let rotateEnabled = true;
+
+    async function loadSettingsFromSupabase() {
+      try {
+        // Load global settings (rotate enabled/disabled)
+        const { data: settingsData, error: settingsError } = await supabaseClient
+          .from('global_settings')
+          .select('value')
+          .eq('key', 'rotate_enabled')
+          .single();
+
+        if (settingsError && settingsError.code !== 'PGRST116') {
+          console.warn('Error loading global settings:', settingsError);
+        } else if (settingsData) {
+          rotateEnabled = settingsData.value;
+        }
+
+        // Load rotation admins
+        const { data: adminsData, error: adminsError } = await supabaseClient
+          .from('rotation_admins')
+          .select('*')
+          .order('sort_order', { ascending: true });
+
+        if (adminsError) {
+          console.error('Error loading rotation admins:', adminsError);
+          throw adminsError;
+        }
+
+        return {
+          rotationAdmins: adminsData || [],
+          rotateEnabled: rotateEnabled
+        };
+      } catch (error) {
+        console.error('Failed to load settings from Supabase:', error);
+        throw error;
+      }
+    }
+
+    function rotateToNext() {
+      // Filter only enabled admins
+      const active = rotationAdmins.filter(a => a && a.enabled && a.link);
+      
+      if (active.length === 0) {
+        statusEl.classList.add("error");
+        statusEl.textContent = "❌ Tiada admin aktif untuk rotate.";
+        return;
+      }
+
+      // Move to next admin
+      currentIndex = (currentIndex + 1) % active.length;
+      const adm = active[currentIndex];
+      
+      statusEl.classList.remove("error");
+      statusEl.textContent = `🔁 Redirect ke: ${adm.name || 'admin'} (${currentIndex + 1}/${active.length})`;
+      
+      // Redirect after short delay
+      setTimeout(() => { 
+        window.location.href = adm.link; 
+      }, 500);
+    }
+
+    (async function boot(){
+      try {
+        statusEl.textContent = "⏳ Memuatkan tetapan dari Supabase...";
+        
+        const settings = await loadSettingsFromSupabase();
+        
+        if (!settings) {
+          statusEl.classList.add("error");
+          statusEl.textContent = "❌ Tidak dapat memuatkan tetapan.";
+          return;
+        }
+
+        rotationAdmins = settings.rotationAdmins;
+        rotateEnabled = settings.rotateEnabled;
+
+        // Global OFF?
+        if (!rotateEnabled) {
+          statusEl.classList.add("error");
+          statusEl.textContent = "⛔ Rotate dimatikan oleh admin (Global OFF).";
+          return;
+        }
+
+        // Filter only enabled admins
+        const active = rotationAdmins.filter(a => a && a.enabled && a.link);
+        if (active.length === 0) {
+          statusEl.classList.add("error");
+          statusEl.textContent = "❌ Tiada admin aktif untuk rotate.";
+          return;
+        }
+
+        // Show success message and button
+        statusEl.classList.remove("error");
+        statusEl.textContent = `✅ Sedia untuk rotate! ${active.length} admin aktif.`;
+        rotateBtn.style.display = "inline-block";
+        
+      } catch (error) {
+        statusEl.classList.add("error");
+        statusEl.textContent = "❌ Ralat memuatkan tetapan. Sila cuba lagi.";
+        console.error('Boot error:', error);
+      }
+    })();
+  </script>
+</body>
+</html>

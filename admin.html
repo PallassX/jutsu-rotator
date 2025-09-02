@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="ms">
+<head>
+  <meta charset="UTF-8" />
+  <title>Rotate Admin Panel - Supabase</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+  <script src="supabase-config.js"></script>
+  <style>
+    :root { --card-bg:#fff; --muted:#666; --border:#ddd; --radius:12px; }
+    body { font-family: Arial, sans-serif; padding: 20px; max-width: 980px; margin: auto; background:#f4f4f4; color:#111; }
+    h2, h3 { text-align:center; margin: 8px 0 10px; }
+    p.helper { color: var(--muted); font-size: 14px; text-align:center; margin-top: -2px; }
+    .wrap { background: var(--card-bg); border:1px solid var(--border); border-radius: var(--radius);
+      padding:16px; box-shadow: 0 2px 10px rgba(0,0,0,0.04); margin-top: 14px; }
+    .row-3 { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:12px; }
+    @media (max-width: 700px){ .row-3 { grid-template-columns: 1fr; } }
+    label { font-weight:600; display:block; margin-top:8px; }
+    input, button {
+      width: 100%; padding: 10px; margin: 6px 0; box-sizing: border-box;
+      border:1px solid var(--border); border-radius:10px; background:#fff;
+    }
+    button { cursor: pointer; border:0; background:#111; color:#fff; font-weight:700; }
+    .btn-ghost { background:#fff; color:#111; border:1px solid var(--border); }
+    .btn-inline { width:auto; padding:8px 12px; margin-left:8px; }
+    .flex { display:flex; align-items:center; gap:10px; justify-content:center; flex-wrap:wrap; }
+    .status { font-size: 16px; text-align:center; margin-top: 8px; color: #0a7c2f; }
+    .badge { display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px; background:#f1f1f1; border:1px solid var(--border); }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; background:#fff; border-radius:10px;
+      overflow:hidden; border:1px solid var(--border); }
+    th, td { border-bottom: 1px solid #eee; padding: 10px; text-align: center; font-size:14px; }
+    th { background:#fafafa; }
+    .switch { position: relative; display: inline-block; width: 48px; height: 26px; }
+    .switch input { display:none; }
+    .slider { position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background:#ccc; transition:.2s; border-radius:999px; }
+    .slider:before { position:absolute; content:""; height:20px; width:20px; left:3px; top:3px; background:white; transition:.2s; border-radius:50%; }
+    input:checked + .slider { background:#0a7c2f; }
+    input:checked + .slider:before { transform: translateX(22px); }
+    .muted { color:#666; font-size:13px; }
+  </style>
+</head>
+<body>
+  <h2>🔄 Rotation Admins — Supabase Database</h2>
+  <p id="status" class="status">Click to Rotate Mode aktif. Data disimpan dalam Supabase database.</p>
+
+  <!-- Master ON/OFF -->
+  <div class="wrap flex" style="justify-content:space-between">
+    <div class="badge">
+      <strong>Global Rotate:</strong>
+      <label class="switch" style="margin-left:8px">
+        <input type="checkbox" id="masterToggle">
+        <span class="slider"></span>
+      </label>
+    </div>
+    <div class="muted">Matikan untuk hentikan semua redirect walaupun ada admin aktif.</div>
+  </div>
+
+  <!-- … bahagian atas fail kekal sama … -->
+
+<div class="wrap">
+  <div class="row-3">
+    <div>
+      <label>Nama Admin:</label>
+      <input type="text" id="rotName" placeholder="Contoh: Admin 1">
+    </div>
+    <div>
+      <label>Link Admin:</label>
+      <input type="text" id="rotLink" placeholder="https://t.me/namatelegram">
+    </div>
+    <div style="display:flex; align-items:end; gap:8px;">
+      <button onclick="addRotationAdmin()">➕ Tambah Admin</button>
+    </div>
+  </div>
+
+  <table aria-label="Senarai admin untuk rotation">
+    <thead><tr><th>#</th><th>Aktif</th><th>Nama</th><th>Link</th><th>Naik</th><th>Turun</th><th>❌</th></tr></thead>
+    <tbody id="rotationTable"></tbody>
+  </table>
+
+  <div class="badge" style="margin-top:8px;">Mode: Click to Rotate (Supabase Database)</div>
+  <p class="helper">Nota: Semua data disimpan dalam <em>Supabase database</em>. Perubahan akan berlaku secara real-time di halaman public (index.html). Setiap klik akan rotate ke admin seterusnya.</p>
+</div>
+
+<script>
+  // ====== STATE ======
+  let rotationAdmins = [];
+  let rotateEnabled = true;
+
+  // ====== SUPABASE FUNCTIONS ======
+  async function loadRotationAdmins() {
+    try {
+      const { data, error } = await supabaseClient
+        .from('rotation_admins')
+        .select('*')
+        .order('sort_order', { ascending: true });
+
+      if (error) throw error;
+      return data || [];
+    } catch (error) {
+      console.error('Error loading rotation admins:', error);
+      throw error;
+    }
+  }
+
+  async function loadGlobalSettings() {
+    try {
+      const { data, error } = await supabaseClient
+        .from('global_settings')
+        .select('value')
+        .eq('key', 'rotate_enabled')
+        .single();
+
+      if (error && error.code !== 'PGRST116') throw error;
+      return data ? data.value : true;
+    } catch (error) {
+      console.error('Error loading global settings:', error);
+      return true; // default to enabled
+    }
+  }
+
+  async function saveGlobalSettings(enabled) {
+    try {
+      const { error } = await supabaseClient
+        .from('global_settings')
+        .upsert({ key: 'rotate_enabled', value: enabled });
+
+      if (error) throw error;
+    } catch (error) {
+      console.error('Error saving global settings:', error);
+      throw error;
+    }
+  }
+
+  async function addRotationAdminToSupabase(name, link) {
+    try {
+      // Get the next sort order
+      const maxOrder = rotationAdmins.length > 0 
+        ? Math.max(...rotationAdmins.map(a => a.sort_order || 0)) 
+        : 0;
+
+      const { data, error } = await supabaseClient
+        .from('rotation_admins')
+        .insert([{ name, link, enabled: true, sort_order: maxOrder + 1 }])
+        .select();
+
+      if (error) throw error;
+      return data[0];
+    } catch (error) {
+      console.error('Error adding rotation admin:', error);
+      throw error;
+    }
+  }
+
+  async function updateRotationAdmin(id, updates) {
+    try {
+      const { error } = await supabaseClient
+        .from('rotation_admins')
+        .update(updates)
+        .eq('id', id);
+
+      if (error) throw error;
+    } catch (error) {
+      console.error('Error updating rotation admin:', error);
+      throw error;
+    }
+  }
+
+  async function deleteRotationAdmin(id) {
+    try {
+      const { error } = await supabaseClient
+        .from('rotation_admins')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+    } catch (error) {
+      console.error('Error deleting rotation admin:', error);
+      throw error;
+    }
+  }
+
+  // ====== RENDER TABLE ======
+  function renderRotationTable(){
+    const tbody = document.getElementById("rotationTable");
+    tbody.innerHTML = "";
+    rotationAdmins.forEach((adm, idx) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${idx+1}</td>
+        <td>
+          <label class="switch">
+            <input type="checkbox" ${adm.enabled ? "checked":""} onchange="toggleAdminEnabled(${adm.id}, this.checked)">
+            <span class="slider"></span>
+          </label>
+        </td>
+        <td>${escapeHtml(adm.name || "")}</td>
+        <td><a href="${escapeUrl(adm.link)}" target="_blank" rel="noopener">${escapeHtml(adm.link || "")}</a></td>
+        <td><button class="btn-ghost" onclick="moveRotation(${idx}, -1)" ${idx===0?'disabled':''} title="Naik">⬆️</button></td>
+        <td><button class="btn-ghost" onclick="moveRotation(${idx}, 1)" ${idx===rotationAdmins.length-1?'disabled':''} title="Turun">⬇️</button></td>
+        <td><button class="btn-ghost" onclick="removeRotationAdmin(${adm.id})" aria-label="Padam admin ${idx+1}">❌</button></td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
+
+  async function toggleAdminEnabled(id, isOn){
+    try {
+      await updateRotationAdmin(id, { enabled: isOn });
+      await refreshData();
+      updateStatus("✅ Admin status dikemas kini.");
+    } catch (error) {
+      updateStatus("❌ Ralat mengemas kini status admin.");
+    }
+  }
+
+  async function addRotationAdmin(){
+    const name = document.getElementById("rotName").value.trim();
+    const link = document.getElementById("rotLink").value.trim();
+    if(!name || !link){ alert("Sila isi Nama dan Link Admin."); return; }
+    
+    try {
+      updateStatus("⏳ Menambah admin...");
+      await addRotationAdminToSupabase(name, link);
+      await refreshData();
+      document.getElementById("rotName").value = ""; 
+      document.getElementById("rotLink").value = "";
+      updateStatus("✅ Admin berjaya ditambah.");
+    } catch (error) {
+      updateStatus("❌ Ralat menambah admin.");
+    }
+  }
+
+  async function removeRotationAdmin(id){
+    if (!confirm("Adakah anda pasti mahu padam admin ini?")) return;
+    
+    try {
+      updateStatus("⏳ Memadam admin...");
+      await deleteRotationAdmin(id);
+      await refreshData();
+      updateStatus("✅ Admin berjaya dipadam.");
+    } catch (error) {
+      updateStatus("❌ Ralat memadam admin.");
+    }
+  }
+
+  async function moveRotation(idx, delta){
+    const newIdx = idx + delta;
+    if(newIdx < 0 || newIdx >= rotationAdmins.length) return;
+    
+    try {
+      // Swap sort orders
+      const currentAdmin = rotationAdmins[idx];
+      const targetAdmin = rotationAdmins[newIdx];
+      
+      await updateRotationAdmin(currentAdmin.id, { sort_order: targetAdmin.sort_order });
+      await updateRotationAdmin(targetAdmin.id, { sort_order: currentAdmin.sort_order });
+      
+      await refreshData();
+      updateStatus("✅ Susunan admin dikemas kini.");
+    } catch (error) {
+      updateStatus("❌ Ralat mengemas kini susunan admin.");
+    }
+  }
+
+  async function refreshData() {
+    try {
+      rotationAdmins = await loadRotationAdmins();
+      renderRotationTable();
+    } catch (error) {
+      updateStatus("❌ Ralat memuatkan data.");
+    }
+  }
+
+  function updateStatus(message) {
+    const st = document.getElementById("status");
+    st.textContent = message;
+    setTimeout(() => {
+      st.textContent = "Click to Rotate Mode aktif. Data disimpan dalam Supabase database.";
+    }, 3000);
+  }
+
+  // ====== HELPERS ======
+  function escapeHtml(str) {
+    return String(str).replace(/[&<>"']/g, s => (
+      { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":"&#39;" }[s]
+    ));
+  }
+  function escapeUrl(url){
+    try { return new URL(url).toString(); } catch { return '#'; }
+  }
+
+  // ====== INIT ======
+  async function boot(){
+    try {
+      updateStatus("⏳ Memuatkan data dari Supabase...");
+      
+      // Load data
+      rotationAdmins = await loadRotationAdmins();
+      rotateEnabled = await loadGlobalSettings();
+      
+      // Setup UI
+      document.getElementById("masterToggle").checked = !!rotateEnabled;
+      document.getElementById("masterToggle").addEventListener("change", async (e)=> {
+        try {
+          rotateEnabled = !!e.target.checked;
+          await saveGlobalSettings(rotateEnabled);
+          updateStatus(rotateEnabled ? "✅ Rotate Mode diaktifkan." : "⛔ Rotate Mode dimatikan.");
+        } catch (error) {
+          updateStatus("❌ Ralat mengemas kini tetapan global.");
+          e.target.checked = !rotateEnabled; // revert checkbox
+        }
+      });
+      
+      renderRotationTable();
+      updateStatus("✅ Data berjaya dimuatkan dari Supabase.");
+      
+    } catch (error) {
+      updateStatus("❌ Ralat memuatkan data dari Supabase.");
+      console.error('Boot error:', error);
+    }
+  }
+  
+  window.onload = boot;
+</script>
