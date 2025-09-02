@@ -2,7 +2,7 @@
 <html lang="ms">
 <head>
   <meta charset="UTF-8" />
-  <title>Redirect Telegram | Click to Rotate</title>
+  <title>Redirect Telegram | Auto Rotate</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
   <script src="supabase-config.js"></script>
@@ -17,19 +17,23 @@
   </style>
 </head>
 <body>
-  <h2>🔁 Click to Rotate Links</h2>
-  <div class="badge"><strong>Mode:</strong> Click to Rotate</div>
+  <h2>🔁 Auto Redirect Telegram</h2>
+  <div class="badge"><strong>Mode:</strong> Auto Redirect</div>
   <p class="status" id="status">⏳ Memeriksa tetapan...</p>
-  <p class="muted">Klik butang di bawah untuk rotate ke admin seterusnya.</p>
-  <button id="rotateBtn" onclick="rotateToNext()" style="display:none; margin-top:20px; padding:12px 24px; background:#0a7c2f; color:white; border:none; border-radius:8px; font-size:16px; cursor:pointer;">🔄 Rotate ke Admin Seterusnya</button>
+  <p class="muted">Sedang memuatkan admin seterusnya...</p>
+  <div id="countdown" style="display:none; margin-top:20px; padding:12px 24px; background:#0a7c2f; color:white; border-radius:8px; font-size:16px;">
+    <span id="countdownText">Redirect dalam: <span id="timer">3</span> saat</span>
+  </div>
 
   <script>
     const statusEl = document.getElementById("status");
-    const rotateBtn = document.getElementById("rotateBtn");
+    const countdownEl = document.getElementById("countdown");
+    const timerEl = document.getElementById("timer");
     
     let rotationAdmins = [];
     let currentIndex = 0;
     let rotateEnabled = true;
+    let countdownInterval = null;
 
     async function loadSettingsFromSupabase() {
       try {
@@ -67,7 +71,25 @@
       }
     }
 
-    function rotateToNext() {
+    function startCountdown(admin, totalAdmins) {
+      let timeLeft = 3;
+      countdownEl.style.display = "block";
+      
+      const updateTimer = () => {
+        timerEl.textContent = timeLeft;
+        timeLeft--;
+        
+        if (timeLeft < 0) {
+          clearInterval(countdownInterval);
+          window.location.href = admin.link;
+        }
+      };
+      
+      updateTimer(); // Show initial count
+      countdownInterval = setInterval(updateTimer, 1000);
+    }
+
+    function autoRedirectToNext() {
       // Filter only enabled admins
       const active = rotationAdmins.filter(a => a && a.enabled && a.link);
       
@@ -79,15 +101,13 @@
 
       // Move to next admin
       currentIndex = (currentIndex + 1) % active.length;
-      const adm = active[currentIndex];
+      const admin = active[currentIndex];
       
       statusEl.classList.remove("error");
-      statusEl.textContent = `🔁 Redirect ke: ${adm.name || 'admin'} (${currentIndex + 1}/${active.length})`;
+      statusEl.textContent = `🔁 Redirect ke: ${admin.name || 'admin'} (${currentIndex + 1}/${active.length})`;
       
-      // Redirect after short delay
-      setTimeout(() => { 
-        window.location.href = adm.link; 
-      }, 500);
+      // Start countdown and redirect
+      startCountdown(admin, active.length);
     }
 
     (async function boot(){
@@ -120,10 +140,14 @@
           return;
         }
 
-        // Show success message and button
+        // Show success message and start auto-redirect
         statusEl.classList.remove("error");
-        statusEl.textContent = `✅ Sedia untuk rotate! ${active.length} admin aktif.`;
-        rotateBtn.style.display = "inline-block";
+        statusEl.textContent = `✅ Memuatkan admin seterusnya... ${active.length} admin aktif.`;
+        
+        // Start auto-redirect after a short delay
+        setTimeout(() => {
+          autoRedirectToNext();
+        }, 1000);
         
       } catch (error) {
         statusEl.classList.add("error");
