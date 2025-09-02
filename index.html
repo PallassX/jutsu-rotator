@@ -115,18 +115,18 @@
         return;
       }
 
-      // Move to next admin
-      currentIndex = (currentIndex + 1) % active.length;
-      const admin = active[currentIndex];
+      // Randomly select an admin from active admins
+      const randomIndex = Math.floor(Math.random() * active.length);
+      const admin = active[randomIndex];
       
-      // Save the new rotation index to database
-      await saveCurrentRotationIndex(currentIndex);
+      // Save the random index to database (for admin panel display)
+      await saveCurrentRotationIndex(randomIndex);
       
       statusEl.classList.remove("error");
-      statusEl.textContent = `🔁 Redirect ke: ${admin.name || 'admin'} (${currentIndex + 1}/${active.length})`;
+      statusEl.textContent = `🔁 Redirect ke: ${admin.name || 'admin'} (${randomIndex + 1}/${active.length}) - Random`;
       
       // Debug info
-      console.log(`Rotation: Index ${currentIndex}, Admin: ${admin.name}, Total active: ${active.length}`);
+      console.log(`Random Rotation: Index ${randomIndex}, Admin: ${admin.name}, Total active: ${active.length}`);
       
       // Start countdown and redirect
       startCountdown(admin, active.length);

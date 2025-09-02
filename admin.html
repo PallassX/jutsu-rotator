@@ -42,24 +42,6 @@
 <body>
   <h2>🔄 Rotation Admins — Supabase Database</h2>
   <p id="status" class="status">Click to Rotate Mode aktif. Data disimpan dalam Supabase database.</p>
-  
-  <!-- Debug Panel -->
-  <div class="wrap" style="background: #f8f9fa; border: 1px solid #dee2e6;">
-    <h3>🔧 Debug Information</h3>
-    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 12px;">
-      <div>
-        <strong>Connection Status:</strong> <span id="debugConnection">Testing...</span><br>
-        <strong>Rotation Admins:</strong> <span id="debugAdmins">Loading...</span><br>
-        <strong>Global Settings:</strong> <span id="debugSettings">Loading...</span>
-      </div>
-      <div>
-        <strong>Current Index:</strong> <span id="debugIndex">Loading...</span><br>
-        <strong>Rotate Enabled:</strong> <span id="debugEnabled">Loading...</span><br>
-        <strong>Last Error:</strong> <span id="debugError">None</span>
-      </div>
-    </div>
-    <button onclick="runDebugTests()" class="btn-ghost" style="margin-top: 10px;">🔍 Run Debug Tests</button>
-  </div>
 
   <!-- Master ON/OFF -->
   <div class="wrap flex" style="justify-content:space-between">
@@ -73,29 +55,27 @@
     <div class="muted">Matikan untuk hentikan semua redirect dan matikan semua admin. Hidupkan untuk aktifkan semua admin.</div>
   </div>
 
-  <!-- Rotation Index Management -->
+  <!-- Random Selection Management -->
   <div class="wrap">
-    <h3>🔄 Rotation Index Management</h3>
+    <h3>🎲 Random Admin Selection</h3>
     <div class="row-3">
       <div>
-        <label>Current Rotation Index:</label>
+        <label>Last Selected Index:</label>
         <div class="badge" id="currentIndexDisplay">Loading...</div>
       </div>
       <div>
-        <label>Next Admin:</label>
+        <label>Active Admins:</label>
         <div class="badge" id="nextAdminDisplay">Loading...</div>
       </div>
       <div>
-        <label>Set Index:</label>
-        <input type="number" id="setIndexInput" placeholder="0" min="0" style="width:80px; display:inline-block; margin-right:8px;">
-        <button onclick="setRotationIndex()" class="btn-ghost btn-inline">Set</button>
+        <label>Test Random:</label>
+        <button onclick="testRandomSelection()" class="btn-ghost btn-inline">🎲 Test</button>
       </div>
     </div>
     <div style="display:flex; gap:8px; margin-top:10px;">
-      <button onclick="resetRotationIndex()" class="btn-ghost">🔄 Reset to 0</button>
       <button onclick="refreshRotationInfo()" class="btn-ghost">🔄 Refresh</button>
     </div>
-    <p class="muted">Rotation index determines which admin will be selected next. Reset to 0 to start from the first admin.</p>
+    <p class="muted">Each visit will randomly select from active admins. The index shows the last selected admin.</p>
   </div>
 
   <!-- … bahagian atas fail kekal sama … -->
@@ -358,10 +338,8 @@
     try {
       rotationAdmins = await loadRotationAdmins();
       renderRotationTable();
-      updateDebugInfo();
     } catch (error) {
       updateStatus("❌ Ralat memuatkan data.");
-      document.getElementById("debugError").textContent = error.message;
     }
   }
 
@@ -373,46 +351,26 @@
     }, 3000);
   }
 
-  async function resetRotationIndex() {
+  async function testRandomSelection() {
     try {
-      updateStatus("⏳ Resetting rotation index...");
-      await saveRotationIndex(0);
-      await refreshRotationInfo();
-      updateStatus("✅ Rotation index reset to 0.");
-    } catch (error) {
-      updateStatus("❌ Error resetting rotation index.");
-    }
-  }
-
-  async function setRotationIndex() {
-    try {
-      const input = document.getElementById("setIndexInput");
-      const newIndex = parseInt(input.value);
-      
-      if (isNaN(newIndex) || newIndex < 0) {
-        updateStatus("❌ Please enter a valid index (0 or higher).");
-        return;
-      }
-
       const active = rotationAdmins.filter(a => a && a.enabled && a.link);
       if (active.length === 0) {
         updateStatus("❌ No active admins found.");
         return;
       }
 
-      // Validate index is within range
-      if (newIndex >= active.length) {
-        updateStatus(`❌ Index must be between 0 and ${active.length - 1}.`);
-        return;
-      }
-
-      updateStatus("⏳ Setting rotation index...");
-      await saveRotationIndex(newIndex);
-      await refreshRotationInfo();
-      input.value = ""; // Clear input
-      updateStatus(`✅ Rotation index set to ${newIndex}.`);
+      // Generate random selection
+      const randomIndex = Math.floor(Math.random() * active.length);
+      const selectedAdmin = active[randomIndex];
+      
+      updateStatus(`🎲 Random test: Would select ${selectedAdmin.name} (${randomIndex + 1}/${active.length})`);
+      
+      // Update display to show the test result
+      document.getElementById("currentIndexDisplay").textContent = `${randomIndex} (Test)`;
+      document.getElementById("nextAdminDisplay").textContent = `${selectedAdmin.name} (Test)`;
+      
     } catch (error) {
-      updateStatus("❌ Error setting rotation index.");
+      updateStatus("❌ Error testing random selection.");
     }
   }
 
@@ -423,7 +381,7 @@
       // Load current settings
       const settings = await loadGlobalSettings();
       currentRotationIndex = settings.currentRotationIndex;
-      console.log('Current rotation index:', currentRotationIndex);
+      console.log('Last selected index:', currentRotationIndex);
       
       // Update display
       const currentIndexDisplay = document.getElementById("currentIndexDisplay");
@@ -431,88 +389,29 @@
         currentIndexDisplay.textContent = currentRotationIndex;
       }
       
-      // Update input field placeholder
-      const input = document.getElementById("setIndexInput");
-      if (input && !input.value) { // Only update placeholder if input is empty
-        input.placeholder = currentRotationIndex;
-      }
-      
-      // Calculate next admin
+      // Show active admins count
       const active = rotationAdmins.filter(a => a && a.enabled && a.link);
       console.log('Active admins:', active);
       
       const nextAdminDisplay = document.getElementById("nextAdminDisplay");
       if (nextAdminDisplay) {
         if (active.length > 0) {
-          const nextIndex = (currentRotationIndex + 1) % active.length;
-          const nextAdmin = active[nextIndex];
-          nextAdminDisplay.textContent = `${nextAdmin.name} (${nextIndex + 1}/${active.length})`;
+          nextAdminDisplay.textContent = `${active.length} admins available`;
         } else {
           nextAdminDisplay.textContent = "No active admins";
         }
       }
       
-      updateDebugInfo();
     } catch (error) {
       console.error('Error refreshing rotation info:', error);
       const currentIndexDisplay = document.getElementById("currentIndexDisplay");
       const nextAdminDisplay = document.getElementById("nextAdminDisplay");
       if (currentIndexDisplay) currentIndexDisplay.textContent = "Error";
       if (nextAdminDisplay) nextAdminDisplay.textContent = "Error";
-      document.getElementById("debugError").textContent = error.message;
     }
   }
 
-  // ====== DEBUG FUNCTIONS ======
-  function updateDebugInfo() {
-    try {
-      document.getElementById("debugConnection").textContent = "Connected";
-      document.getElementById("debugAdmins").textContent = `${rotationAdmins.length} admins`;
-      document.getElementById("debugIndex").textContent = currentRotationIndex;
-      document.getElementById("debugEnabled").textContent = rotateEnabled ? "Yes" : "No";
-      
-      const activeAdmins = rotationAdmins.filter(a => a && a.enabled && a.link);
-      document.getElementById("debugSettings").textContent = `${activeAdmins.length} active`;
-    } catch (error) {
-      document.getElementById("debugError").textContent = error.message;
-    }
-  }
 
-  async function runDebugTests() {
-    const debugError = document.getElementById("debugError");
-    debugError.textContent = "Running tests...";
-    
-    try {
-      // Test 1: Connection
-      const { data, error } = await supabaseClient
-        .from('global_settings')
-        .select('count')
-        .limit(1);
-      
-      if (error) throw error;
-      document.getElementById("debugConnection").textContent = "✅ Connected";
-      
-      // Test 2: Load admins
-      const admins = await loadRotationAdmins();
-      document.getElementById("debugAdmins").textContent = `✅ ${admins.length} admins`;
-      
-      // Test 3: Load settings
-      const settings = await loadGlobalSettings();
-      document.getElementById("debugSettings").textContent = `✅ Settings loaded`;
-      
-      // Test 4: Test toggle
-      const testToggle = !rotateEnabled;
-      await saveGlobalSettings(testToggle);
-      await saveGlobalSettings(rotateEnabled); // Restore
-      document.getElementById("debugEnabled").textContent = `✅ Toggle works`;
-      
-      debugError.textContent = "All tests passed!";
-      
-    } catch (error) {
-      console.error('Debug test error:', error);
-      debugError.textContent = `❌ ${error.message}`;
-    }
-  }
 
   // ====== HELPERS ======
   function escapeHtml(str) {
@@ -576,13 +475,11 @@
       
       renderRotationTable();
       await refreshRotationInfo();
-      updateDebugInfo();
       updateStatus("✅ Data berjaya dimuatkan dari Supabase.");
       
     } catch (error) {
       console.error('Boot error:', error);
       updateStatus("❌ Ralat memuatkan data dari Supabase: " + error.message);
-      document.getElementById("debugError").textContent = error.message;
     }
   }
   
